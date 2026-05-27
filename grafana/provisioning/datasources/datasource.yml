@@ -1,0 +1,15 @@
+# Auto-provisionamento de datasource. Sem isso, alguém teria que clicar
+# manualmente em "Add data source" depois de cada deploy — antipattern.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # 'prometheus' é o nome do serviço no docker-compose; DNS Docker resolve.
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: "15s"
+      httpMethod: POST

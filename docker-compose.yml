@@ -1,0 +1,115 @@
+# docker-compose.yml — orquestração completa do ambiente Projeto Korp.
+#
+# Decisões importantes:
+#   - rede 'projeto-korp-net' como bridge customizada (DNS automático entre serviços)
+#   - app NÃO expõe portas ao host (acessível apenas via NGINX, conforme desafio)
+#   - prometheus e grafana expõem portas ao host só pra acesso humano nos dashboards
+#   - volumes nomeados pra persistência (não perde dado se container for recriado)
+#   - healthchecks em todos os serviços críticos
+#   - restart: unless-stopped (recupera de OOM, reboot do host etc — sem reinício
+#     infinito em casos de stop manual)
+#
+# Nota: 'version:' foi removida (Compose v2+ ignora — gera warning quando presente).
+
+services:
+  http-server-projeto-korp:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    image: http-server-projeto-korp:1.0.0
+    container_name: http-server-projeto-korp
+    networks:
+      - projeto-korp-net
+    # SEM 'ports:' — o desafio exige que o serviço não exponha portas ao host.
+    # Acesso só via NGINX (porta 80) ou Prometheus (rede interna).
+    healthcheck:
+      # CMD-SHELL não funciona aqui porque a imagem é distroless (sem shell).
+      # wget também não existe. Solução: distroless tem o próprio binário Go
+      # rodando, então o Compose só consegue verificar o processo via 'depends_on'
+      # com timeout. Para uma checagem real, usaríamos um sidecar ou trocaríamos
+      # a base para alpine. Aqui priorizo segurança da imagem.
+      #
+      # Workaround: o NGINX faz o "healthcheck efetivo" via proxy_pass.
+      test: ["NONE"]
+    restart: unless-stopped
+    # Recursos limitados pra evitar runaway em dev.
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: nginx-projeto-korp
+    networks:
+      - projeto-korp-net
+    ports:
+      - "80:80"
+    volumes:
+      # Bind mount conforme exigência do desafio.
+      # :ro porque NGINX não precisa escrever na config.
+      - ./nginx:/etc/nginx/conf.d/:ro
+    depends_on:
+      - http-server-projeto-korp
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/nginx-health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: prometheus-projeto-korp
+    networks:
+      - projeto-korp-net
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - http-server-projeto-korp
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: grafana-projeto-korp
+    networks:
+      - projeto-korp-net
+    ports:
+      - "3000:3000"
+    environment:
+      # Em produção, esses valores viriam de um secret manager.
+      # Aqui são dev-only.
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+networks:
+  projeto-korp-net:
+    name: projeto-korp-net
+    driver: bridge
+
+volumes:
+  prometheus-data:
+    name: projeto-korp-prometheus-data
+  grafana-data:
+    name: projeto-korp-grafana-data

@@ -1,0 +1,28 @@
+# Go
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/app/http-server-projeto-korp
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Ansible
+*.retry
+ansible/.vault_pass
+
+# Docker
+.docker/
+
+# Logs locais
+*.log

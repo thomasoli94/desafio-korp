@@ -1,0 +1,81 @@
+---
+# Role 'docker' — instala Docker Engine + plugin Compose v2 + cria a rede bridge.
+#
+# Decisões:
+#   - usa repositório oficial Docker (não o docker.io do Ubuntu, que fica defasado)
+#   - habilita repositório via signed-by (apt-key é deprecated desde Ubuntu 22.04)
+#   - cria a rede via comando docker (módulo community.docker exige coleção extra
+#     e dependências Python — preferimos zero-dep além do core ansible)
+
+- name: "Instala dependências de apt para HTTPS"
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+      - python3-pip
+    state: present
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: "Cria diretório para chaves apt"
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: "Adiciona chave GPG oficial do Docker"
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: '0644'
+    force: false  # idempotência: só baixa se não existir
+
+- name: "Adiciona repositório oficial Docker (signed-by)"
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ ansible_architecture | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}
+      signed-by=/etc/apt/keyrings/docker.asc]
+      https://download.docker.com/linux/ubuntu
+      {{ ansible_distribution_release }} stable
+    state: present
+    filename: docker
+
+- name: "Instala Docker Engine + CLI + plugin Compose v2"
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: yes
+
+- name: "Garante que o serviço docker está habilitado e rodando"
+  ansible.builtin.systemd:
+    name: docker
+    enabled: yes
+    state: started
+
+- name: "Adiciona usuário ao grupo docker (evita sudo em cada comando)"
+  ansible.builtin.user:
+    name: "{{ ansible_user_id }}"
+    groups: docker
+    append: yes
+  when: ansible_user_id != "root"
+
+- name: "Cria rede Docker bridge 'projeto-korp-net'"
+  ansible.builtin.command:
+    cmd: "docker network create --driver bridge {{ docker_network_name }}"
+  register: docker_network_create
+  changed_when: docker_network_create.rc == 0
+  failed_when:
+    - docker_network_create.rc != 0
+    - "'already exists' not in docker_network_create.stderr"
+
+- name: "Confirma que a rede existe"
+  ansible.builtin.command:
+    cmd: "docker network inspect {{ docker_network_name }}"
+  changed_when: false

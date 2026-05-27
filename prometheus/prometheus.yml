@@ -1,0 +1,28 @@
+# Configuração do Prometheus para o ambiente Korp.
+#
+# scrape_interval = 15s é o padrão; bom equilíbrio entre granularidade e custo.
+# Em produção com muitos targets, ajustaríamos por job.
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: dev
+    project: projeto-korp
+
+scrape_configs:
+  # Self-monitoring: Prometheus colete suas próprias métricas.
+  # Esquecer disso é clássico — debug fica cego se o Prometheus falhar.
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Aplicação principal.
+  # Endereço usa o nome do serviço Docker — DNS interno resolve.
+  # NÃO passa pelo NGINX porque /metrics não deve ser exposto publicamente.
+  - job_name: 'http-server-projeto-korp'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['http-server-projeto-korp:8080']
+        labels:
+          service: 'http-server-projeto-korp'
+          tier: 'backend'
