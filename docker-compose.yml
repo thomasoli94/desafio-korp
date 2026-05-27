@@ -1,16 +1,3 @@
-# docker-compose.yml — orquestração completa do ambiente Projeto Korp.
-#
-# Decisões importantes:
-#   - rede 'projeto-korp-net' como bridge customizada (DNS automático entre serviços)
-#   - app NÃO expõe portas ao host (acessível apenas via NGINX, conforme desafio)
-#   - prometheus e grafana expõem portas ao host só pra acesso humano nos dashboards
-#   - volumes nomeados pra persistência (não perde dado se container for recriado)
-#   - healthchecks em todos os serviços críticos
-#   - restart: unless-stopped (recupera de OOM, reboot do host etc — sem reinício
-#     infinito em casos de stop manual)
-#
-# Nota: 'version:' foi removida (Compose v2+ ignora — gera warning quando presente).
-
 services:
   http-server-projeto-korp:
     build:
@@ -20,19 +7,19 @@ services:
     container_name: http-server-projeto-korp
     networks:
       - projeto-korp-net
-    # SEM 'ports:' — o desafio exige que o serviço não exponha portas ao host.
-    # Acesso só via NGINX (porta 80) ou Prometheus (rede interna).
+    # SEM 'ports:' — acesso só via NGINX (porta 80).
     healthcheck:
-      # CMD-SHELL não funciona aqui porque a imagem é distroless (sem shell).
-      # wget também não existe. Solução: distroless tem o próprio binário Go
-      # rodando, então o Compose só consegue verificar o processo via 'depends_on'
-      # com timeout. Para uma checagem real, usaríamos um sidecar ou trocaríamos
-      # a base para alpine. Aqui priorizo segurança da imagem.
-      #
-      # Workaround: o NGINX faz o "healthcheck efetivo" via proxy_pass.
-      test: ["NONE"]
+      # Distroless não tem shell/curl. Healthcheck efetivo feito pelo NGINX via proxy_pass.
+      disable: true
     restart: unless-stopped
-    # Recursos limitados pra evitar runaway em dev.
+    # Sistema de arquivos somente-leitura — o binário Go é stateless e não precisa escrever.
+    read_only: true
+    tmpfs:
+      - /tmp:size=10m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     deploy:
       resources:
         limits:
@@ -47,18 +34,28 @@ services:
     ports:
       - "80:80"
     volumes:
-      # Bind mount conforme exigência do desafio.
-      # :ro porque NGINX não precisa escrever na config.
       - ./nginx:/etc/nginx/conf.d/:ro
     depends_on:
       - http-server-projeto-korp
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/nginx-health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/nginx-health"]
       interval: 10s
       timeout: 3s
       retries: 3
       start_period: 5s
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    # nginx master precisa de CHOWN/SETUID/SETGID para largar privilégios nos workers
+    # e NET_BIND_SERVICE para escutar na porta 80 (< 1024).
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - NET_BIND_SERVICE
+      - DAC_OVERRIDE
 
   prometheus:
     image: prom/prometheus:v2.54.1
@@ -80,6 +77,8 @@ services:
     depends_on:
       - http-server-projeto-korp
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
 
   grafana:
     image: grafana/grafana:11.2.0
@@ -89,8 +88,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Em produção, esses valores viriam de um secret manager.
-      # Aqui são dev-only.
+      # ATENÇÃO: credenciais de desenvolvimento — nunca usar em produção.
+      # Em produção: usar variáveis de ambiente injetadas pelo CI/CD ou secret manager.
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
@@ -102,6 +101,8 @@ services:
     depends_on:
       - prometheus
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
 
 networks:
   projeto-korp-net:
