@@ -1,7 +1,4 @@
 ---
-# Role 'monitoring' — Prometheus e Grafana já sobem via docker-compose.
-# Aqui validamos que estão acessíveis e que o datasource foi auto-provisionado.
-
 - name: "Aguarda Prometheus responder"
   ansible.builtin.uri:
     url: "http://localhost:9090/-/healthy"
@@ -20,20 +17,19 @@
   delay: 5
   until: grafana_health.status == 200
 
-- name: "Verifica que Prometheus está scraping o serviço (target UP)"
+- name: "Verifica target do serviço no Prometheus"
   ansible.builtin.uri:
     url: "http://localhost:9090/api/v1/targets?state=active"
     return_content: yes
   register: prom_targets
   retries: 6
   delay: 10
-  # Espera o target subir; em ambiente fresco pode levar 30-60s.
   until: >-
     prom_targets.json.data.activeTargets
     | selectattr('labels.job', 'equalto', 'http-server-projeto-korp')
     | selectattr('health', 'equalto', 'up')
     | list | length > 0
 
-- name: "Confirmação observabilidade"
+- name: "Monitoramento OK"
   ansible.builtin.debug:
     msg: "Prometheus e Grafana operacionais. Target 'http-server-projeto-korp' está UP."

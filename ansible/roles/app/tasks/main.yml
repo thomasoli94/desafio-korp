@@ -1,17 +1,11 @@
 ---
-# Role 'app' — sincroniza arquivos do projeto e sobe a stack via docker compose.
-#
-# Estratégia: como o playbook roda 'local' por padrão, os arquivos já estão
-# em {{ project_root }}. Pra deploy remoto, basta adicionar uma task synchronize
-# antes do compose up.
-
-- name: "Cria diretório destino do projeto"
+- name: "Cria diretório do projeto"
   ansible.builtin.file:
     path: /opt/projeto-korp
     state: directory
     mode: '0755'
 
-- name: "Sincroniza arquivos do projeto pro destino"
+- name: "Sincroniza arquivos do projeto"
   ansible.posix.synchronize:
     src: "{{ project_root }}/"
     dest: /opt/projeto-korp/
@@ -19,32 +13,27 @@
     rsync_opts:
       - "--exclude=.git"
       - "--exclude=ansible"
-      - "--exclude=*.zip"
-      - "--exclude=.idea"
-      - "--exclude=.vscode"
   when: project_root != "/opt/projeto-korp"
 
 - name: "Build da imagem da aplicação"
   ansible.builtin.command:
     cmd: "docker compose build http-server-projeto-korp"
     chdir: /opt/projeto-korp
-  register: build_result
-  changed_when: "'Building' in build_result.stdout or 'Built' in build_result.stderr or build_result.rc == 0"
+  changed_when: true
 
-- name: "Sobe a stack completa (app + nginx + prometheus + grafana)"
+- name: "Sobe a stack completa"
   ansible.builtin.command:
     cmd: "docker compose up -d"
     chdir: /opt/projeto-korp
-  register: compose_up
-  changed_when: "'Started' in compose_up.stderr or 'Created' in compose_up.stderr or 'Recreated' in compose_up.stderr"
+  changed_when: true
 
-- name: "Lista containers em execução"
+- name: "Status dos containers"
   ansible.builtin.command:
     cmd: "docker compose ps"
     chdir: /opt/projeto-korp
   register: compose_ps
   changed_when: false
 
-- name: "Status dos containers"
+- name: "Exibe status"
   ansible.builtin.debug:
     var: compose_ps.stdout_lines

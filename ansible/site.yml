@@ -1,15 +1,5 @@
 ---
-# Playbook principal — provisiona TODO o ambiente Projeto Korp num comando:
-#   ansible-playbook site.yml
-#
-# Estrutura por roles separa responsabilidades e facilita reuso/teste:
-#   docker      -> instala engine + plugin compose + cria rede bridge
-#   app         -> sobe stack do docker-compose (build da imagem incluso)
-#   monitoring  -> nada além do que já está no compose (placeholder pra futuras
-#                  extensões: alertmanager, exporters extra etc)
-#   validate    -> faz HTTP check e mostra a resposta no console (exigência do desafio)
-
-- name: "Provisiona ambiente Projeto Korp (Docker + App + Observabilidade)"
+- name: "Provisiona ambiente Projeto Korp"
   hosts: korp
   gather_facts: yes
   vars:
@@ -18,11 +8,11 @@
     service_url: "http://localhost:80/projeto-korp"
 
   pre_tasks:
-    - name: "Confirma que o sistema é Debian/Ubuntu (escopo do desafio)"
+    - name: "Verifica SO compatível (Debian/Ubuntu)"
       ansible.builtin.assert:
         that:
           - ansible_facts['os_family'] == 'Debian'
-        fail_msg: "Este playbook foi escrito pra Ubuntu/Debian. Adapte a role 'docker' pra outras distros."
+        fail_msg: "Playbook suporta apenas Debian/Ubuntu."
 
   roles:
     - role: docker
@@ -30,11 +20,11 @@
     - role: monitoring
 
   post_tasks:
-    - name: "Aguarda serviços ficarem saudáveis"
+    - name: "Aguarda serviços iniciarem"
       ansible.builtin.pause:
         seconds: 10
 
-    - name: "Valida endpoint /projeto-korp via NGINX (porta 80)"
+    - name: "Valida endpoint /projeto-korp"
       ansible.builtin.uri:
         url: "{{ service_url }}"
         method: GET
@@ -45,24 +35,13 @@
       delay: 5
       until: korp_response.status == 200
 
-    - name: "Garante que a resposta tem o campo 'nome' correto"
+    - name: "Verifica campos da resposta"
       ansible.builtin.assert:
         that:
           - korp_response.json.nome == "Projeto Korp"
           - korp_response.json.horario is defined
-        fail_msg: "Resposta do serviço não está no formato esperado"
-        success_msg: "Resposta validada com sucesso"
+        fail_msg: "Resposta fora do formato esperado"
 
-    - name: "Resposta do serviço (conforme exigido pelo desafio)"
+    - name: "Resposta do serviço"
       ansible.builtin.debug:
-        msg:
-          - "=================================================="
-          - "Ambiente Projeto Korp provisionado com sucesso!"
-          - "=================================================="
-          - "Endpoint: {{ service_url }}"
-          - "Status:   HTTP {{ korp_response.status }}"
-          - "Resposta: {{ korp_response.json }}"
-          - "--------------------------------------------------"
-          - "Grafana:    http://localhost:3000 (admin/admin)"
-          - "Prometheus: http://localhost:9090"
-          - "=================================================="
+        msg: "GET {{ service_url }} → HTTP {{ korp_response.status }} | {{ korp_response.json }}"
